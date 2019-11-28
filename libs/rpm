@@ -1,0 +1,31 @@
+# libs/rpm
+# 
+# Functions to help build rpm packages.
+#
+#
+
+# rpm_build_package spec
+rpm_build_package() {
+    local spec=$1
+
+    rpmbuild --define "_topdir `pwd`" --clean -bb "${spec}"
+}
+
+# rpm_update_repository dir
+rpm_update_repository() {
+    local repodata=$1
+
+    if [ ${REPO_HOST} = none ]; then
+        if [ -d "${repodata}/repodata" ]; then
+            createrepo --workers=8 --update "${repodata}"
+        else
+            createrepo --workers=8 "${repodata}"
+        fi
+    else
+	if ssh root@${REPO_HOST} stat ${repodata}/repodata \> /dev/null 2\>\&1; then
+            ssh root@${REPO_HOST} createrepo --workers=8 --update "${repodata}"
+        else
+            ssh root@${REPO_HOST} createrepo --workers=8 "${repodata}"
+        fi
+    fi
+}

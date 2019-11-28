@@ -1,0 +1,88 @@
+# libs/git
+#
+# Functions to control the project source code.
+#
+#
+
+# git_clone remote srcdir
+git_clone() {
+    local remote=$1
+    local srcdir=$2
+
+    git clone --recursive ${remote} "${srcdir}"
+}
+
+
+# git_list_tags
+git_list_tags() {
+    git tag -l
+}
+
+
+# get_fetch_tag srcdir
+git_fetch_tags() {
+    git fetch origin --tags
+}
+
+
+# get_fetch_tag srcdir
+git_fetch_code() {
+    git fetch origin
+
+    submodules=$(git submodule)
+    if [ ! -n "${submodule}" ]; then
+        git submodule init
+        git submodule update
+    fi
+}
+
+# git_update_branch branch
+git_update_branch() {
+    local branch=$1
+
+    # check if branch exists on remote
+    git show origin/${branch} > /dev/null 2>&1
+    if [ $? -ne 0 ]; then
+        die "branch ${branch} do NOT exists, aborting..."
+    fi
+    # checkout branch by force
+    git checkout -f origin/${branch} > /dev/null 2>&1
+    # a local branch might not exist
+    git branch -D ${branch} || true
+    git checkout -b ${branch}
+}
+
+# git_update_tag tag
+git_update_tag() {
+    local tag=$1
+
+    # check if tag exists
+    git show ${tag} > /dev/null 2>&1
+    if [ $? -ne 0 ]; then
+        die "tag ${tag} do NOT exists, aborting..."
+    fi
+    git checkout -f ${tag} > /dev/null 2>&1
+    submodules=$(git submodule)
+    if [ ! -n "${submodule}" ]; then
+        git submodule init
+        git submodule update
+    fi
+}
+
+# git_push
+git_push() {
+    local branch=$1
+
+    # check if branch exists on remote
+    git show origin/${branch} > /dev/null 2>&1
+    if [ $? -ne 0 ]; then
+        die "branch ${branch} do NOT exists, aborting..."
+    fi
+    git push origin $branch
+}
+
+# git_cleanup
+git_cleanup() {
+    git clean -dfx
+    git reset --hard
+}

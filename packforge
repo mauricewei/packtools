@@ -1,0 +1,212 @@
+#!/bin/bash
+
+# Sanitize language settings to avoid commands bailing out
+# with "unsupported locale setting" errors.
+unset LANG
+unset LANGUAGE
+LC_ALL=C
+export LC_ALL
+
+# Make sure umask is sane
+umask 022
+
+# Keep track of the top directory
+TOPDIR=$(cd $(dirname "$0") && pwd)
+
+# Load all libs
+source ${TOPDIR}/libs/common
+source ${TOPDIR}/libs/msg
+
+
+## show usage info
+usage () {
+    echo "USAGE: $0 [OPTIONS] <build|clean> <all|project name>"
+    echo ""
+    echo "Avaible OPTIONS:"
+    echo ""
+    echo "  -B, --specbranch <branch>   Use which branch of SPEC repository to build packages."
+    echo ""
+    echo "  -s, --strategy <tag|commit> Use to controll how we generate source code tarball"
+    echo "                               * tag: generate source code tarball by tag,"
+    echo "                                      this is used to build production packages"
+    echo "                                      and this is the default strategy"
+    echo "                               * commit: generate source code until the latest commit"
+    echo "                                         in the branch specified by -b option, "
+    echo "                                         this is used to build develop packages."
+    echo "  -t, --tag <tag>             Specify a specific tag to use for a project"
+    echo "                               take action only if your strategy is 'tag'"
+    echo "  -b, --branch <branch>       Use which branch to build source code tarball."
+    echo "                               take action only if you have set GITURL in project CONFIG file"
+    echo "  -w, --workers <count>       Fork multiple worker to build packages."
+    echo "                                take action only if you want to build all projects"
+    echo "  -n, --nofetch <spec>   whether the fetch spec"
+    echo "  -h, --help                  Show this help message."
+    echo ""
+    exit
+}
+
+
+## parse cli arguments
+parse_options() {
+    args=$(getopt -o w:b:s:t:B:n:h -l workers:,branch:,strategy:,tag:,specbranch:,nofetch:,help -- "$@")
+
+    if [ $? -ne 0 ]; then
+        usage >&2
+    fi
+    eval set -- "${args}"
+
+    while true
+    do
+        case $1 in
+            -B|--specbranch)
+                SPECS_BRANCH=$2
+                shift 2
+                ;;
+            -s|--strategy)
+                strategy=$2
+                shift 2
+                ;;
+            -t|--tag)
+                tag=$2
+                shift 2
+                ;;
+            -b|--branch)
+                branch=$2
+                shift 2
+                ;;
+            -w|--workers)
+                workers=$2
+                shift 2
+                ;;
+            -n|--nofetch)
+                nofetch=$2
+                shift 2
+                ;;
+            -h|--help)
+                usage
+                ;;
+            --)
+                shift
+                break
+                ;;
+            *)
+                usage
+                ;;
+        esac
+    done
+    if [ $# -ne 2 ]; then
+        usage
+    fi
+    command=$1
+    project=$2
+}
+
+
+## check if command is avalible
+is_valid_command() {
+    local command=$1
+    local avalible_commands=("build" "clean")
+
+    for val in ${avalible_commands[@]}; do
+        if [[ "${val}" == "${command}" ]]; then
+            return 0
+        fi
+    done
+    return 1
+}
+
+
+## check if project is avalible
+is_valid_project() {
+    local project=$1
+
+    if [[ "all" == "${project}" ]]; then
+        return 0
+    fi
+
+    local avalible_projects=( $(ls ${SPECS_REPODIR}/projects) )
+    for val in ${avalible_projects[@]}; do
+        if [[ "${val}" == "${project}" ]]; then
+            return 0
+        fi
+    done
+    return 1
+}
+
+
+## check if strategy is avalible
+is_valid_strategy() {
+    local strategy=$1
+    local avalible_strategies=("tag" "commit")
+
+    for val in ${avalible_strategies[@]}; do
+        if [[ "${val}" == "${strategy}" ]]; then
+            return 0
+        fi
+    done
+    return 1
+}
+
+
+## setup cleanup function
+cleanup_on_exit() {
+    exit_code=$?
+
+    # remove lock file if exists
+    if [ "x" != "x${lockfile}" ]; then
+        rm -f "${lockfile}"
+    fi
+    # check exit code
+    exit $exit_code
+}
+trap "cleanup_on_exit" EXIT
+
+
+## check basic configs
+SPECS_BRANCH=${SPECS_BRANCH:-master}
+SPECS_REPODIR=${SPECS_REPODIR:-/opt/specforge}
+DEVEL_REPODIR=${DEVEL_REPODIR:-/opt/repo/wocloud/devel/RPMS/x86_64}
+STABLE_REPODIR=${STABLE_REPODIR:-/opt/repo/wocloud/products/RPMS/x86_64}
+REPO_HOST=${REPO_HOST:-none}
+
+GERRIT_USER=${GERRIT_USER:-Rpmbuilder}
+GERRIT_HOST=${GERRIT_HOST:-review.ustack.com}
+GERRIT_PORT=${GERRIT_PORT:-29418}
+
+if [ -f "${TOPDIR}/packforgerc" ]; then
+    source  "${TOPDIR}/packforgerc"
+fi
+
+[ ! -d "${SPECS_REPODIR}" ] && die "SPECS_REPODIR is obligatory, exiting.."
+[ ! -d "${DEVEL_REPODIR}" ] && die "DEVEL_REPODIR is obligatory, exiting.."
+[ ! -d "${STABLE_REPODIR}" ] && die "STABLE_REPODIR is obligatory, exiting.."
+
+
+## Parse and validate options
+workers=1
+nofetch='none'
+command=''
+project=''
+branch='master'
+strategy='commit'
+tag='latest'
+parse_options $@
+
+is_valid_command  ${command}  || usage
+is_valid_project  ${project}  || usage
+is_valid_strategy ${strategy} || usage
+
+
+## Build package
+lockfile="/tmp/packforge/${project}.lock"
+if [ -f "${lockfile}" ]; then
+    die "Project is under building, exit..."
+fi
+mkdir -p /tmp/packforge && touch "${lockfile}"
+
+export SPECS_BRANCH
+if [[ "all" == "${project}" ]]; then
+    build_all_projects "${branch}" "${strategy}"
+else
+    build_one_project "${project}" "${branch}" "${strategy}" "${tag}"
+fi

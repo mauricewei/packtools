@@ -1,0 +1,240 @@
+# libs/common
+#
+# Common functions.
+#
+#
+source ${TOPDIR}/libs/gerrit
+source ${TOPDIR}/libs/git
+source ${TOPDIR}/libs/rpm
+
+
+# Build one project's all packages
+build_one_project() {
+    local project=$1
+    local branch=${2:-master}
+    local strategy=${3:-commit}
+    local tag=${4:-latest}
+    local nofetch=${5:-none}
+    local version=""
+
+    projectdir="${SPECS_REPODIR}/projects/${project}"
+    config="${projectdir}/CONFIG"
+    srcdir="${projectdir}/SRC"
+    sourcesdir="${projectdir}/SOURCES"
+    ## Change work directory
+    pushd "${projectdir}" > /dev/null
+    if [ -r "${config}" ]; then
+        source "${config}"
+    fi
+    #if [ "${nofetch}" != "spec" ]; then
+    #    git_fetch_code
+    #    git_update_branch "${SPECS_BRANCH}"
+    #fi
+    ## Step 1: update source code
+    if [ -n "${GITURL}" ]; then
+        info "Fetching source code from git repository..."
+        if [ ! -d "${srcdir}" ]; then
+            mkdir -p "${srcdir}"
+        fi
+        pushd "${srcdir}" > /dev/null
+        if [ ! -d ".git" ]; then
+            git_clone "${GITURL}" .
+        fi
+        git_cleanup
+        git_fetch_tags
+        git_fetch_code
+        if [ "commit" = "${strategy}" ]; then
+            git_update_branch "${branch}"
+            latest_commit=$(git rev-parse --short HEAD)
+            taginfo=$(git log --oneline --decorate | grep 'tag: ' | head -1)
+            if [ "x" = "x${taginfo}" ]; then
+                die "you MUST have one tag in your repository"
+            fi
+            latest_tag=$(echo $taginfo | awk -F 'tag: ' '{print $2}'| awk -F ')' '{print $1}' | awk -F ',' '{print $1}')
+            timeofday=$(date '+%Y%m%d%H%M%S')
+            version="${latest_tag}.${timeofday}.${latest_commit}"
+        elif [ "tag" = "${strategy}" ]; then
+            if [ "latest" = "${tag}" ]; then
+                version=$(git_list_tags | sort -t '.' -k1,1n -k2,2n -k3,3n | tail -1)
+            else
+                version="${tag}"
+            fi
+            git_update_tag "${version}"
+        fi
+        popd > /dev/null
+    fi
+    ## HOOK: PRE
+    if [ -f "${projectdir}/PRE" ]; then
+        pushd "${srcdir}" > /dev/null
+        source "${projectdir}/PRE"
+        popd > /dev/null
+    fi
+    ## Step 2: create source code tarball
+    if [ ! -d "${sourcesdir}" ]; then
+        mkdir -p "${sourcesdir}"
+    fi
+    if [ -n "${URL}" ]; then
+        info "Downloading source code from Internet..."
+        source_code_tarball=${URL##*/}
+        if [ -n "${VERSION}" ]; then
+            version="${VERSION}"
+        else
+            version_info=${source_code_tarball##*-}
+            version=$(echo "${version_info}" | awk -F. '{printf("%s.%s.%s", $1,$2,$3)}')
+        fi
+        pushd "${sourcesdir}" > /dev/null
+        if [ ! -f "${source_code_tarball}" ]; then
+            wget --no-check-certificate -c -O "${source_code_tarball}" "${URL}"
+        fi
+        popd > /dev/null
+    elif [ -n "${GITURL}" ]; then
+        info "Creating source code tarball from git repository..."
+        if [ -n "${NAME}" ]; then
+            source_code_dir="${NAME}-${version}"
+        else
+            source_code_dir="${project}-${version}"
+        fi
+        source_code_tarball="${source_code_dir}.tar.gz"
+        pushd "${srcdir}" > /dev/null
+        type=${TYPE:-script}
+        case $type in
+            python)
+                # update PKG-INFO version
+                old_version=$(awk '/^Version/ {print $2}' "${projectdir}/PKG-INFO")
+                if [ "${old_version}" != "${version}" ]; then
+                    sed -i "s/^Version:\([ \t]*\).*$/Version:\1${version}/g" "${projectdir}/PKG-INFO"
+                fi
+                if [ "miner" = "${project}" ]; then
+                    rm -fr "${srcdir}/miner-code/dist"
+                    \cp -f "${projectdir}/PKG-INFO" "${srcdir}/miner-code/"
+                    pushd "${srcdir}/miner-code" > /dev/bull
+                        python setup.py sdist --quiet > /dev/null
+                    popd > /dev/null
+                    mv -f "${srcdir}/miner-code/dist/${source_code_tarball}" "${sourcesdir}"
+                else
+                    rm -fr "${srcdir}/dist"
+                    \cp -f "${projectdir}/PKG-INFO" "${srcdir}"
+                    python setup.py sdist --quiet > /dev/null
+                    mv -f "${srcdir}/dist/${source_code_tarball}" "${sourcesdir}"
+                fi
+                ;;
+            script)
+                cp -arl "${srcdir}" "${sourcesdir}"
+                pushd "${sourcesdir}" > /dev/null
+                find -name ".git" | xargs rm -rf
+                mv -f "${srcdir##*/}" "${source_code_dir}"
+                tar -czf "${source_code_tarball}" "${source_code_dir}"
+                rm -fr "${source_code_dir}"
+                popd > /dev/null
+                ;;
+            *)
+                error "NOT supported package type: ${type}"
+                exit
+                ;;
+        esac
+        popd > /dev/null
+    fi
+    ## Step 3: build packages with rpmbuild
+    if [ -z "${version}" ]; then
+        die "failed to get version info for ${project}"
+    fi
+    for spec in $(ls *.spec)
+    do
+        info "Building project according to ${spec}..."
+        # update version and release number
+        old_version=$(awk '/^Version/ {print $2}' "${spec}")
+        old_release=$(awk '/^Release/ {print $2}' "${spec}" | cut -d 'w' -f1)
+        if [ "${old_version}" != "${version}" ]; then
+            new_release=${new_release:-1}
+            sed -i "s/Version:\([ \t]*\).*$/Version:\1${version}/g" "${spec}"
+            sed -i "s/Release:\([ \t]*\)\([0-9]*\)\(.*$\)/Release:\1${new_release}\3/g" "${spec}"
+        else
+            old_release=${old_release:-0}
+            new_release=$(expr "${old_release}" + 1)
+            sed -i "s/Release:\([ \t]*\)\([0-9]*\)\(.*$\)/Release:\1${new_release}\3/g" "${spec}"
+        fi
+        rpm_build_package "${spec}"
+        if [ $? -ne 0 ]; then
+            git checkout HEAD -- .
+            die "ERROR occur when building packages, exiting..."
+        fi
+    done
+    if [ "tag" = "${strategy}" ]; then
+        git add *.spec PKG-INFO
+        git commit -m "PACKFORGE: ${project} bump to ${version}-${new_release}wocloud"
+        git push origin ${branch}
+    else
+        git checkout HEAD -- .
+    fi
+    ## Step 4: upload packages to repository
+    if [ "commit" = "${strategy}" ]; then
+        repodir="${DEVEL_REPODIR}"
+    else
+        repodir="${STABLE_REPODIR}"
+    fi
+    for dir in $(ls "${projectdir}/RPMS")
+    do
+        pushd "${projectdir}/RPMS/${dir}" > /dev/null
+        if [ "$(ls | wc -l)" -gt 0 ]; then
+            if [ ${REPO_HOST} = none ]; then
+                rsync -av --remove-sent-files * "${repodir}"
+            else
+                rsync -av --remove-sent-files * root@${REPO_HOST}:${repodir}
+            fi
+        fi
+        popd > /dev/null
+    done
+    worker_count=$(ls "/tmp/packforge" | wc -l)
+    if [ -f "/tmp/packforge/all.lock" -o "${worker_count}" -gt 1 ]; then
+        info "Leave repository update to later builder"
+    else
+        info "Updating repository..."
+        rpm_update_repository "${repodir}"
+    fi
+    ## HOOK: POST
+    if [ -f "${projectdir}/POST" ]; then
+        pushd "${srcdir}" > /dev/null
+        source "${projectdir}/POST"
+        popd > /dev/null
+    fi
+    ## Step 5: clean project
+    git clean -fdx
+    popd > /dev/null
+}
+
+
+build_all_projects() {
+    local branch=${1:-master}
+    local strategy=${2:-commit}
+    local queue="/tmp/packforge/queue.$$"
+
+    ## create a FIFO pipe as queue
+    mkfifo "${queue}" && exec 3<> "${queue}"
+    rm -f "${queue}"
+
+    for ((i=0; i < $workers; i++)); do echo; done >&3
+
+    for project in $(ls "${SPECS_REPODIR}/projects")
+    do
+        read -u3
+        (
+            info "Building ${project} ..."
+            build_one_project "${project}" "${branch}" "${strategy}"
+            info "Building ${project} DONE"
+            echo >&3
+        ) &
+    done
+    wait
+
+    ## close FIFO pipe
+    exec 3>&-
+
+    ## update repository
+    info "Updating repository..."
+    if [ "commit" = "${strategy}" ]; then
+        repodir="${DEVEL_REPODIR}"
+    else
+        repodir="${STABLE_REPODIR}"
+    fi
+    rpm_update_repository "${repodir}"
+}

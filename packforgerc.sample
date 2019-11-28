@@ -1,0 +1,7 @@
+SEPCS_BRANCH=master
+SPECS_REPODIR=~/specforge
+DEVEL_REPODIR=~/RPMS/devel
+STABLE_REPODIR=~/RPMS/stable
+
+GERRIT_USER="PACKFORGE"
+GERRIT_HOST="review.ustack.com"

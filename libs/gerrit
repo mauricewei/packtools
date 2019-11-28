@@ -1,0 +1,13 @@
+# libs/git
+#
+# Functions to implement auto commit on gerrit.
+#
+#
+
+# gerrit_submit commit
+gerrit_submit() {
+    local commit=$1
+
+    ssh -p $GERRIT_PORT $GERRIT_USER@$GERRIT_HOST \
+        gerrit review --verified +1 --code-review +2 --submit $commit
+}

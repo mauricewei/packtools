@@ -52,7 +52,7 @@ build_one_project() {
             fi
             latest_tag=$(echo $taginfo | awk -F 'tag: ' '{print $2}'| awk -F ')' '{print $1}' | awk -F ',' '{print $1}')
             timeofday=$(date '+%Y%m%d%H%M%S')
-            version="${latest_tag}.${timeofday}.${latest_commit}"
+            version="${latest_tag}.${timeofday}.${latest_commit}rc0"
         elif [ "tag" = "${strategy}" ]; then
             if [ "latest" = "${tag}" ]; then
                 version=$(git_list_tags | sort -t '.' -k1,1n -k2,2n -k3,3n | tail -1)

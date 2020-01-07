@@ -43,19 +43,19 @@ build_one_project() {
         git_cleanup
         git_fetch_tags
         git_fetch_code
+        git_update_branch "${branch}"
+        taginfo=$(git log --oneline --decorate | grep 'tag: ' | head -1)
+        if [ "x" = "x${taginfo}" ]; then
+            die "you MUST have one tag in your repository"
+        fi
+        latest_tag=$(echo $taginfo | awk -F 'tag: ' '{print $2}'| awk -F ')' '{print $1}' | awk -F ',' '{print $1}')
         if [ "commit" = "${strategy}" ]; then
-            git_update_branch "${branch}"
             latest_commit=$(git rev-parse --short HEAD)
-            taginfo=$(git log --oneline --decorate | grep 'tag: ' | head -1)
-            if [ "x" = "x${taginfo}" ]; then
-                die "you MUST have one tag in your repository"
-            fi
-            latest_tag=$(echo $taginfo | awk -F 'tag: ' '{print $2}'| awk -F ')' '{print $1}' | awk -F ',' '{print $1}')
             timeofday=$(date '+%Y%m%d%H%M%S')
             version="${latest_tag}.${timeofday}.${latest_commit}rc0"
         elif [ "tag" = "${strategy}" ]; then
             if [ "latest" = "${tag}" ]; then
-                version=$(git_list_tags | sort -t '.' -k1,1n -k2,2n -k3,3n | tail -1)
+                version=${latest_tag}
             else
                 version="${tag}"
             fi

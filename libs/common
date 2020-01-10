@@ -160,6 +160,21 @@ build_one_project() {
         fi
     done
     if [ "tag" = "${strategy}" ]; then
+        # Update version and release number again.
+        # NOTE(weimeng): When one build task is building stage,and another task is finished,
+        # 2nd task maybe excute 'git checkout HEAD -- .' .In this situation we have to update
+        #  version again.
+        old_version=$(awk '/^Version/ {print $2}' "${spec}")
+        old_release=$(awk '/^Release/ {print $2}' "${spec}" | cut -d 'w' -f1)
+        if [ "${old_version}" != "${version}" ]; then
+            new_release=${new_release:-1}
+            sed -i "s/Version:\([ \t]*\).*$/Version:\1${version}/g" "${spec}"
+            sed -i "s/Release:\([ \t]*\)\([0-9]*\)\(.*$\)/Release:\1${new_release}\3/g" "${spec}"
+        fi
+        old_version=$(awk '/^Version/ {print $2}' "${projectdir}/PKG-INFO")
+        if [ "${old_version}" != "${version}" ]; then
+            sed -i "s/^Version:\([ \t]*\).*$/Version:\1${version}/g" "${projectdir}/PKG-INFO"
+        fi
         git add *.spec PKG-INFO
         git commit -m "PACKFORGE: ${project} bump to ${version}-${new_release}wocloud"
         git push origin ${SPECS_BRANCH}

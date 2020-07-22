@@ -16,19 +16,19 @@ build_one_project() {
     local tag=${4:-latest}
     local nofetch=${5:-none}
     local version=""
-
+    set -x
     projectdir="${SPECS_REPODIR}/projects/${project}"
     config="${projectdir}/CONFIG"
     srcdir="${projectdir}/SRC"
     sourcesdir="${projectdir}/SOURCES"
     ## Change work directory
     pushd "${projectdir}" > /dev/null
-    if [ -r "${config}" ]; then
-        source "${config}"
-    fi
     if [ "${nofetch}" != "spec" ]; then
         git_fetch_code
         git_update_branch "${SPECS_BRANCH}"
+    fi
+    if [ -r "${config}" ]; then
+        source "${config}"
     fi
     ## Step 1: update source code
     if [ -n "${GITURL}" ]; then

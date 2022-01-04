@@ -165,8 +165,8 @@ trap "cleanup_on_exit" EXIT
 ## check basic configs
 SPECS_BRANCH=${SPECS_BRANCH:-master}
 SPECS_REPODIR=${SPECS_REPODIR:-/opt/specforge}
-DEVEL_REPODIR=${DEVEL_REPODIR:-/opt/repo/wocloud/devel/RPMS/x86_64}
-STABLE_REPODIR=${STABLE_REPODIR:-/opt/repo/wocloud/products/RPMS/x86_64}
+DEVEL_REPODIR=${DEVEL_REPODIR:-/opt}
+STABLE_REPODIR=${STABLE_REPODIR:-/opt}
 REPO_HOST=${REPO_HOST:-none}
 
 GERRIT_USER=${GERRIT_USER:-Rpmbuilder}
